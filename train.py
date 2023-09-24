@@ -30,14 +30,10 @@ if __name__ == '__main__':
     with open(args.config_file) as f:
         config = json.load(f)
 
-    log_dir = args.output_dir + '/low_batch'
-    if not os.path.exists(log_dir):
-        os.mkdir(log_dir)
-    tb_writer = SummaryWriter(log_dir)
-
     batch_size = config['train']['batch_size']
     max_epoch = config['train']['max_epoch']
     eval_interval = config['train']['eval_interval']
+    step_batch = config['train']['step_batch']
     warmup = config['train']['warmup']
     beta1 = config['train']['beta1']
     beta2 = config['train']['beta2']
@@ -50,6 +46,12 @@ if __name__ == '__main__':
     n_heads = config['model']['n_head']
     dropout_p = config['model']['dropout_p']
     d_k = d_model // n_heads
+
+    
+    log_dir = args.output_dir + f'/batch_{batch_size}'
+    if not os.path.exists(log_dir):
+        os.mkdir(log_dir)
+    tb_writer = SummaryWriter(log_dir)
         
 
     with open(args.vocab_pkl, 'rb') as fr:
@@ -112,19 +114,20 @@ if __name__ == '__main__':
             if step_num == 100000: 
                 break
             
-            step_num += 1
-            optimizer.param_groups[0]['lr'] = d_model ** (-0.5) * np.minimum(step_num ** (-0.5), step_num * (warmup ** (-1.5)))
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
-            tb_writer.add_scalar('loss/step', total_loss, step_num)
-            tb_writer.add_scalar('lr/step', optimizer.param_groups[0]['lr'], step_num)
-            tb_writer.flush()
+            if stack > 1 and stack % step_batch == 1:
+                step_num += 1
+                optimizer.param_groups[0]['lr'] = d_model ** (-0.5) * np.minimum(step_num ** (-0.5), step_num * (warmup ** (-1.5)))
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                tb_writer.add_scalar('loss/step', total_loss, step_num)
+                tb_writer.add_scalar('lr/step', optimizer.param_groups[0]['lr'], step_num)
+                tb_writer.flush()
+                total_loss = 0
             
             if stack % eval_interval == 1:
                 elapsed = (time.time() - start)/60
-                print("Step: %d | Loss: %f | Time: %f[min]" %(step_num, total_loss, elapsed))
-                total_loss = 0
+                print("Step: %d | Loss: %f | Time: %f[min]" %(step_num, loss, elapsed))
                 start = time.time()
 
             else:
@@ -177,7 +180,7 @@ if __name__ == '__main__':
                                 word = temp + word
                             temp = ''
                         if word == '<eos>':
-                            continue
+                            break
                         prediction.append(word)
                     sentence = ' '.join(prediction)
                     predictions.append(sentence + '\n')
